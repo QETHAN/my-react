@@ -11,8 +11,8 @@
     "react-scripts": "5.0.1"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
+    "start": "export DISABLE_NEW_JSX_TRANSFORM=false&&react-scripts start",
+    "build": "export DISABLE_NEW_JSX_TRANSFORM=true&&react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
