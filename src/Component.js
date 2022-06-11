@@ -46,12 +46,12 @@ class Updater {
 
     // 属性变化，或者state变化，都会触发更新
     if (nextProps || pendingStates.length > 0) {
-      shouldUpdate(classInstance, nextProps, this.getState())
+      shouldUpdate(classInstance, nextProps, this.getState(nextProps))
     }
   }
 
   // 根据老状态，和pendingStates，计算新状态
-  getState() {
+  getState(nextProps) {
     let {classInstance, pendingStates} = this
 
     let state = classInstance.state // 老状态
@@ -65,6 +65,14 @@ class Updater {
     })
 
     pendingStates.length = 0 // 清空队列
+
+    if (classInstance.constructor.getDerivedStateFromProps) {
+      // 新属性，老状态
+      let partialState = classInstance.constructor.getDerivedStateFromProps(nextProps, classInstance.state)
+      if (partialState) {
+        state = {...state, ...partialState}
+      }
+    }
     return state
   }
 }
@@ -94,7 +102,7 @@ function shouldUpdate(classInstance, nextProps, nextState) {
   classInstance.state = nextState // 修改实例的状态, 永远指向最新
 
   if (willUpdate) {
-    classInstance.forceUpdate()
+    classInstance.updateComponent()
   }
 }
 
@@ -114,13 +122,29 @@ class Component {
     throw new Error('render() must be implemented')
   }
 
+  // 属性和状态都没变化，强制更新
+  forceUpdate() {
+    let nextState = this.state
+    let nextProps = this.props
+
+    if (this.constructor.getDerivedStateFromProps) {
+      let partialState = this.constructor.getDerivedStateFromProps(nextProps, nextState)
+      if (partialState) {
+        nextState = {...nextState, ...partialState}
+      }
+    }
+
+    this.state = nextState
+    this.updateComponent()
+  }
+
   /**
    * 组件更新
    * 1. 获取老的vdom
    * 2. 更加最新属性和state，计算新的vdom，然后进行diff，把差异同步到真实dom上
    */
-  forceUpdate() {
-    console.log('forceUpdate');
+  updateComponent() {
+    console.log('updateComponent');
     let oldRenderVdom = this.oldRenderVdom
     let oldDOM = findDOM(oldRenderVdom)
     let newRenderVdom = this.render()

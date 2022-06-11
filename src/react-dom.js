@@ -7,6 +7,11 @@ import { addEvent } from './event';
 function render(vdom, container) {
     let dom = createDOM(vdom);
     container.appendChild(dom);
+    
+    // 挂载之后再执行
+    if (dom.componentDidMount) {
+      dom.componentDidMount()
+    }
 }
 
 export function createDOM(vdom) {
@@ -65,12 +70,14 @@ function mountClassComponent(vdom) {
     classInstance.componentWillMount()
   }
 
-  let renderVdom = classInstance.render()
-
-  // didMount
-  if (classInstance.componentDidMount) {
-    classInstance.componentDidMount()
+  if (type.getDerivedStateFromProps) {
+    let partialState = type.getDerivedStateFromProps(classInstance.props, classInstance.state)
+    if (partialState) {
+      classInstance.state = {...classInstance.state, ...partialState}
+    }
   }
+
+  let renderVdom = classInstance.render()
 
   classInstance.oldRenderVdom = vdom.oldRenderVdom = renderVdom
 
@@ -78,7 +85,14 @@ function mountClassComponent(vdom) {
     ref.current = classInstance
   }
 
-  return createDOM(renderVdom)
+  let dom = createDOM(renderVdom)
+
+  // didMount
+  if (classInstance.componentDidMount) {
+    dom.componentDidMount = classInstance.componentDidMount.bind(this)
+  }
+
+  return dom
 }
 
 function mountFunctionComponent(vdom) {
@@ -159,35 +173,42 @@ export function compareTwoVdom(parentDOM, oldVdom, newVdom, nextDOM) {
     } else {
       parentDOM.appendChild(newDOM)// 不一定在最后边
     }
+    if (newDOM.componentDidMount) {
+      newDOM.componentDidMount()
+    }
   } else if (oldVdom && newVdom && (oldVdom.type !== newVdom.type)) { // 老的不为null, 新的不为null, 但是类型不一样，要替换
     let oldDOM = findDOM(oldVdom)
     let newDOM = createDOM(newVdom)
     parentDOM.replaceChild(newDOM, oldDOM)
 
+    // 旧节点卸载
     if (oldVdom.classInstance && oldVdom.classInstance.componentWillUnmount) {
       oldVdom.classInstance.componentWillUnmount()
     }
-    
+
+    // 新节点挂载
+    if (newDOM.componentDidMount) {
+      newDOM.componentDidMount()
+    }
   } else { // 老的不为null, 新的不为null, 类型一样，需要复用老节点，要递归dom-diff
     updateElement(oldVdom, newVdom)
   }
-
-  return newVdom
-
 }
 
+// 新旧vdom 类型一样
 function updateElement(oldVdom, newVdom) {
   if (oldVdom.type === REACT_TEXT && newVdom.type === REACT_TEXT) { // 文本节点
-    let currentDOM = newVdom.dom = oldVdom.dom // 不用新建dom了
-    currentDOM.textContent = newVdom.props.content
-  } else if (typeof oldVdom.type === 'string') { // 原生组件
-    let currentDOM = newVdom.dom = oldVdom.dom
+    let currentDOM = newVdom.dom = findDOM(oldVdom) // 不用新建dom了
+
+    if (oldVdom.props.content !== newVdom.props.content) {
+      currentDOM.textContent = newVdom.props.content
+    }
+  } else if (typeof oldVdom.type === 'string') { // 原生组件 div p
+    let currentDOM = newVdom.dom = findDOM(oldVdom)
     updateProps(currentDOM, oldVdom.props, newVdom.props)
     updateChildren(currentDOM, oldVdom.props.children, newVdom.props.children)
   } else if (typeof oldVdom.type === 'function') { // 组件
     if (oldVdom.type.isReactComponent) {
-      newVdom.classInstance = oldVdom.classInstance
-      newVdom.oldRenderVdom = oldVdom.oldRenderVdom
       updateClassComponent(oldVdom, newVdom)
     } else {
       updateFunctionComponent(oldVdom, newVdom)
@@ -196,8 +217,9 @@ function updateElement(oldVdom, newVdom) {
 }
 
 function updateClassComponent(oldVdom, newVdom) {
-  let classInstance = oldVdom.classInstance
-  if (classInstance.componentWillReceiveProps) {
+  let classInstance = newVdom.classInstance = oldVdom.classInstance
+  newVdom.oldRenderVdom = oldVdom.oldRenderVdom
+  if (classInstance.componentWillReceiveProps) { // 因为此更新是由于父组件更新导致的，子组件会拿到新的属性
     classInstance.componentWillReceiveProps(newVdom.props)
   }
 
@@ -208,9 +230,10 @@ function updateFunctionComponent(oldVdom, newVdom) {
   let parentDOM =findDOM(oldVdom).parentNode
   let {type, props} = newVdom
   let newRenderVdom = type(props)
-  
-  compareTwoVdom(parentDOM, oldVdom.oldRenderVdom, newRenderVdom)
+   
   newVdom.oldRenderVdom = newRenderVdom
+
+  compareTwoVdom(parentDOM, oldVdom.oldRenderVdom, newRenderVdom)
 }
 
 function updateChildren(parentDOM, oldVChildren, newVChildren) {
@@ -219,8 +242,9 @@ function updateChildren(parentDOM, oldVChildren, newVChildren) {
 
   let maxLength = Math.max(oldVChildren.length, newVChildren.length)
   for (let i = 0; i < maxLength; i++) {
-    let nextDOM = oldVChildren.find((item, index) => index > i && item && item.dom)
-    compareTwoVdom(parentDOM, oldVChildren[i], newVChildren[i], nextDOM)
+    // find的参数是一个返回boolean的函数，如果为true，则返回当前的元素
+    let nextVNode = oldVChildren.find((item, index) => index > i && item && findDOM(item))
+    compareTwoVdom(parentDOM, oldVChildren[i], newVChildren[i], nextVNode && findDOM(nextVNode))
   }
 }
 
